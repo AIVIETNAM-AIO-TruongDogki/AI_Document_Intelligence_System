@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 
 class EmbeddingProvider(ABC):
     """Abstract Base Class định nghĩa giao diện chung cho mọi nhà cung cấp Embedding.
-    
+
     Quy tắc:
     - dimension: Số chiều vector đầu ra (ví dụ: 64, 384, 768, 1536).
     - embed_documents: Nhận vào danh sách đoạn text -> trả về ma trận vector.
