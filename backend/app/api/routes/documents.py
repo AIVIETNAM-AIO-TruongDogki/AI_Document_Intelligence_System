@@ -1,10 +1,10 @@
-from dataclasses import replace
-from uuid import uuid4
-from typing import Annotated
 import tempfile
+from dataclasses import replace
 from pathlib import Path
+from typing import Annotated
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status  # noqa: F401
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from app.api.deps import get_documents_store, get_search_service
 from app.api.schemas.documents import (
