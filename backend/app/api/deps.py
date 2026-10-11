@@ -1,7 +1,12 @@
 from app.documents.models import ParsedDocument
 from app.embeddings.mock import MockEmbeddingProvider
 from app.embeddings.service import EmbeddingService
-from app.retrieval.service import SearchService
+from app.llm.base import MockLLMProvider
+from app.rag.context_builder import ContextBuilder
+from app.rag.service import RAGService
+from app.retrieval.bm25 import BM25Retriever
+from app.retrieval.reranker import MockReranker
+from app.retrieval.service import HybridSearchService, SearchService
 from app.retrieval.vector_store import BaseVectorStore, InMemoryVectorStore
 
 # Khởi tạo các singleton service cho tầng API
@@ -10,6 +15,23 @@ _vector_store: BaseVectorStore = InMemoryVectorStore()
 _embedding_provider = MockEmbeddingProvider(dimension=64)
 _embedding_service = EmbeddingService(_embedding_provider)
 _search_service = SearchService(_embedding_service, _vector_store)
+
+# Khởi tạo RAG Pipeline Singletons
+_bm25_retriever = BM25Retriever()
+_reranker = MockReranker()
+_hybrid_search_service = HybridSearchService(
+    embedding_service=_embedding_service,
+    vector_store=_vector_store,
+    bm25_retriever=_bm25_retriever,
+    reranker=_reranker,
+)
+_context_builder = ContextBuilder(max_context_tokens=2000)
+_llm_provider = MockLLMProvider()
+_rag_service = RAGService(
+    retrieval_service=_hybrid_search_service,
+    context_builder=_context_builder,
+    llm_provider=_llm_provider,
+)
 
 # Lưu trữ cache các tài liệu đã upload trong bộ nhớ
 _documents_store: dict[str, ParsedDocument] = {}
@@ -33,3 +55,8 @@ def get_search_service() -> SearchService:
 def get_documents_store() -> dict[str, ParsedDocument]:
     """Dependency cung cấp kho lưu trữ tài liệu."""
     return _documents_store
+
+
+def get_rag_service() -> RAGService:
+    """Dependency cung cấp RAG Service."""
+    return _rag_service
