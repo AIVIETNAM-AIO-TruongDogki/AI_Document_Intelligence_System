@@ -25,8 +25,17 @@ _hybrid_search_service = HybridSearchService(
     bm25_retriever=_bm25_retriever,
     reranker=_reranker,
 )
+from app.core.config import settings
+from app.llm.base import BaseLLMProvider
+from app.llm.gemini import GeminiProvider
+
 _context_builder = ContextBuilder(max_context_tokens=2000)
-_llm_provider = MockLLMProvider()
+_llm_provider: BaseLLMProvider
+if settings.gemini_api_key:
+    _llm_provider = GeminiProvider(api_key=settings.gemini_api_key)
+else:
+    _llm_provider = MockLLMProvider()
+
 _rag_service = RAGService(
     retrieval_service=_hybrid_search_service,
     context_builder=_context_builder,
