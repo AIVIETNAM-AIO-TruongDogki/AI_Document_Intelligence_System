@@ -1,3 +1,15 @@
+# Environment files
 .env
-*.pytest_cache
-__pycache__
+.env.*
+!.env.example
+/labs
+# Python Bytecode
+__pycache__/
+*.py[cod]
+
+# Testing & Linters Caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
