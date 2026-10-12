@@ -42,6 +42,13 @@ _rag_service = RAGService(
     llm_provider=_llm_provider,
 )
 
+# Cung cấp dependency cho document repository
+from typing import Annotated
+from fastapi import Depends
+from sqlalchemy.orm import Session
+from app.db.session import get_db
+from app.db.repositories.document_repo import DocumentRepository
+
 # Lưu trữ cache các tài liệu đã upload trong bộ nhớ
 _documents_store: dict[str, ParsedDocument] = {}
 
@@ -69,3 +76,7 @@ def get_documents_store() -> dict[str, ParsedDocument]:
 def get_rag_service() -> RAGService:
     """Dependency cung cấp RAG Service."""
     return _rag_service
+
+
+def get_document_repo(db: Annotated[Session, Depends(get_db)]) -> DocumentRepository:
+    return DocumentRepository(db)
