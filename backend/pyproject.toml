@@ -18,10 +18,15 @@ dependencies = [
     "tiktoken>=0.7.0",
     "python-multipart>=0.0.9",
     "sqlalchemy>=2.0.20",
+    "alembic>=1.13.0",
     "psycopg[binary]>=3.2.0",
     "psycopg2-binary>=2.9.9",
     "google-generativeai>=0.8.0",
 ]
+
+[tool.pyright]
+venvPath = "."
+venv = ".env"
 
 [project.optional-dependencies]
 dev = [
