@@ -1,3 +1,4 @@
+from app.db.repositories.document_repo import DocumentRepository
 import tempfile
 from dataclasses import replace
 from pathlib import Path
@@ -6,7 +7,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
-from app.api.deps import get_documents_store, get_search_service
+from app.api.deps import get_documents_store, get_search_service, get_document_repo
 from app.api.schemas.documents import (
     ChunkSchema,
     DocumentDetailResponse,
@@ -29,21 +30,10 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 async def upload_document(
     file: Annotated[UploadFile, File(description="File PDF cần phân tích")],
     search_service: Annotated[SearchService, Depends(get_search_service)],
-    documents_store: Annotated[dict[str, ParsedDocument], Depends(get_documents_store)],
+    doc_repo: Annotated[DocumentRepository, Depends(get_document_repo)],
 ) -> DocumentUploadResponse:
     """API tải lên tài liệu PDF.
     
-    Yêu cầu:
-    1. Kiểm tra nếu file không có tên hoặc không đuôi .pdf -> raise HTTPException(400, "Chỉ chấp nhận tệp định dạng .pdf.")
-    2. Tạo document_id ngẫu nhiên: doc_<uuid>
-    3. Lưu file tạm bằng tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-    4. Trong khối try:
-       - Gọi process_pdf(path=tmp_path, document_id=document_id)
-       - Gọi search_service.index_chunks(parsed_doc.chunks)
-       - Lưu vào documents_store[document_id] = parsed_doc
-       - Trả về DocumentUploadResponse(...)
-       - Bắt (InvalidDocumentError, NoExtractableTextError) -> raise HTTPException(422, detail=str(exc))
-    5. Trong khối finally: Xóa file tạm tmp_path.unlink() nếu file còn tồn tại.
     """
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(
@@ -67,7 +57,8 @@ async def upload_document(
             )
 
         search_service.index_chunks(parsed_doc.chunks)
-        documents_store[document_id] = parsed_doc
+        doc_repo.save_parsed_document(parsed_doc, file_size=len(content))
+
         return DocumentUploadResponse(
             document_id=document_id,
             filename=parsed_doc.metadata.filename,
@@ -92,34 +83,26 @@ async def upload_document(
 )
 def get_document_detail(
     document_id: str,
-    documents_store: Annotated[dict[str, ParsedDocument], Depends(get_documents_store)],
+    doc_repo: Annotated[DocumentRepository, Depends(get_document_repo)],
 ) -> DocumentDetailResponse:
     """Lấy danh sách các chunks và metadata của tài liệu đã phân tích.
-    
-    Yêu cầu:
-    1. Lấy parsed_doc = documents_store.get(document_id)
-    2. Nếu không tìm thấy: raise HTTPException(404, f"Không tìm thấy tài liệu với ID: {document_id}")
-    3. Trả về DocumentDetailResponse(document_id, filename, page_count, chunks=[ChunkSchema(...)])
     """
-    parsed_doc = documents_store.get(document_id)
-    if parsed_doc is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Không tìm thấy tài liệu với ID: {document_id}",
-        )
+    doc = doc_repo.get_by_id(document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài liệu")
 
     return DocumentDetailResponse(
-        document_id=parsed_doc.metadata.document_id,
-        filename=parsed_doc.metadata.filename,
-        page_count=parsed_doc.metadata.page_count,
+        document_id=doc.id,
+        filename=doc.filename,
+        page_count=doc.page_count,
         chunks=[
             ChunkSchema(
-                chunk_id=chunk.chunk_id,
+                chunk_id=chunk.id,
                 document_id=chunk.document_id,
                 text=chunk.text,
                 page_numbers=list(chunk.page_numbers),
                 token_count=chunk.token_count,
             )
-            for chunk in parsed_doc.chunks
+            for chunk in doc.chunks
         ],
     )
