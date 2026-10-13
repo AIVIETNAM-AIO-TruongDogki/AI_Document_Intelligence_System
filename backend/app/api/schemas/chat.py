@@ -1,3 +1,6 @@
+import datetime
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -20,6 +23,10 @@ class ChatRequest(BaseModel):
         ge=1,
         le=20,
         description="Số lượng đoạn văn bản liên quan nhất được dùng làm ngữ cảnh",
+    )
+    session_id: str | None = Field(
+        default=None,
+        description="(Tùy chọn) ID của phiên trò chuyện. Nếu không cung cấp, hệ thống sẽ tự động tạo phiên mới.",
     )
 
 
@@ -46,9 +53,37 @@ class TokenUsageSchema(BaseModel):
 class ChatResponse(BaseModel):
     """Schema kết quả phản hồi từ hệ thống RAG."""
 
+    session_id: str = Field(..., description="ID định danh phiên trò chuyện")
     answer: str = Field(..., description="Câu trả lời của trợ lý kèm trích dẫn [Nguồn X]")
     sources: list[SourceSchema] = Field(
         default_factory=list, description="Danh sách các nguồn trích dẫn"
     )
     model: str = Field(..., description="Tên mô hình LLM đã thực hiện sinh câu trả lời")
     usage: TokenUsageSchema = Field(..., description="Thống kê lượng token đã sử dụng")
+
+
+class ChatMessageSchema(BaseModel):
+    """Schema mô tả một tin nhắn trong lịch sử chat."""
+
+    id: str = Field(..., description="ID tin nhắn")
+    role: str = Field(..., description="Vai trò: user hoặc assistant")
+    content: str = Field(..., description="Nội dung tin nhắn")
+    sources: list[dict[str, Any]] | None = Field(default=None, description="Trích dẫn nguồn")
+    tokens_used: dict[str, int] | None = Field(default=None, description="Lượng token sử dụng")
+    created_at: datetime.datetime = Field(..., description="Thời gian tạo")
+
+
+class ChatSessionSchema(BaseModel):
+    """Schema thông tin phiên trò chuyện."""
+
+    id: str = Field(..., description="ID phiên trò chuyện")
+    title: str = Field(..., description="Tiêu đề phiên trò chuyện")
+    created_at: datetime.datetime = Field(..., description="Thời gian tạo")
+    updated_at: datetime.datetime = Field(..., description="Thời gian cập nhật gần nhất")
+
+
+class ChatSessionDetailSchema(ChatSessionSchema):
+    """Schema chi tiết phiên trò chuyện kèm toàn bộ tin nhắn."""
+
+    messages: list[ChatMessageSchema] = Field(default_factory=list, description="Lịch sử các tin nhắn")
+

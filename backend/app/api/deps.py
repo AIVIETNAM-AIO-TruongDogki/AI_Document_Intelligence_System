@@ -44,10 +44,13 @@ _rag_service = RAGService(
 
 # Cung cấp dependency cho document repository
 from typing import Annotated
+
 from fastapi import Depends
 from sqlalchemy.orm import Session
-from app.db.session import get_db
+
+from app.db.repositories.chat_repo import ChatRepository
 from app.db.repositories.document_repo import DocumentRepository
+from app.db.session import get_db
 
 # Lưu trữ cache các tài liệu đã upload trong bộ nhớ
 _documents_store: dict[str, ParsedDocument] = {}
@@ -80,3 +83,7 @@ def get_rag_service() -> RAGService:
 
 def get_document_repo(db: Annotated[Session, Depends(get_db)]) -> DocumentRepository:
     return DocumentRepository(db)
+
+
+def get_chat_repo(db: Annotated[Session, Depends(get_db)]) -> ChatRepository:
+    return ChatRepository(db)

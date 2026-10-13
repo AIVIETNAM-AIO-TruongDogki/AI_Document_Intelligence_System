@@ -1,4 +1,3 @@
-from app.db.repositories.document_repo import DocumentRepository
 import tempfile
 from dataclasses import replace
 from pathlib import Path
@@ -7,14 +6,14 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
-from app.api.deps import get_documents_store, get_search_service, get_document_repo
+from app.api.deps import get_document_repo, get_search_service
 from app.api.schemas.documents import (
     ChunkSchema,
     DocumentDetailResponse,
     DocumentUploadResponse,
 )
+from app.db.repositories.document_repo import DocumentRepository
 from app.documents.exceptions import InvalidDocumentError, NoExtractableTextError
-from app.documents.models import ParsedDocument
 from app.documents.service import process_pdf
 from app.retrieval.service import SearchService
 
