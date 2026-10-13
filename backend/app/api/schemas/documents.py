@@ -28,3 +28,13 @@ class DocumentDetailResponse(BaseModel):
     filename: str
     page_count: int
     chunks: list[ChunkSchema]
+
+
+class DocumentListItemSchema(BaseModel):
+    """Schema mô tả một tài liệu trong danh sách."""
+
+    document_id: str = Field(..., description="ID của tài liệu")
+    filename: str = Field(..., description="Tên tệp gốc")
+    file_size: int = Field(..., description="Kích thước tệp (bytes)")
+    page_count: int = Field(..., description="Số lượng trang")
+

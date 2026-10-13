@@ -10,6 +10,7 @@ from app.api.deps import get_document_repo, get_search_service
 from app.api.schemas.documents import (
     ChunkSchema,
     DocumentDetailResponse,
+    DocumentListItemSchema,
     DocumentUploadResponse,
 )
 from app.db.repositories.document_repo import DocumentRepository
@@ -105,3 +106,43 @@ def get_document_detail(
             for chunk in doc.chunks
         ],
     )
+
+
+@router.get(
+    "",
+    response_model=list[DocumentListItemSchema],
+    summary="Lấy danh sách các tài liệu đã tải lên",
+)
+def list_documents(
+    doc_repo: Annotated[DocumentRepository, Depends(get_document_repo)],
+) -> list[DocumentListItemSchema]:
+    """Lấy danh sách toàn bộ tài liệu đã lưu trong CSDL."""
+    docs = doc_repo.list_documents()
+    return [
+        DocumentListItemSchema(
+            document_id=doc.id,
+            filename=doc.filename,
+            file_size=doc.file_size,
+            page_count=doc.page_count,
+        )
+        for doc in docs
+    ]
+
+
+@router.delete(
+    "/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Xóa tài liệu",
+)
+def delete_document(
+    document_id: str,
+    doc_repo: Annotated[DocumentRepository, Depends(get_document_repo)],
+) -> None:
+    """Xóa một tài liệu và tự động cascade xóa toàn bộ trang & chunks liên quan."""
+    deleted = doc_repo.delete_by_id(document_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Không tìm thấy tài liệu với ID: {document_id}",
+        )
+
