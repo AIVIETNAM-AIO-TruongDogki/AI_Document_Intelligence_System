@@ -1,6 +1,8 @@
 from sqlalchemy.orm import Session
-from app.db.models import DocumentModel, DocumentPageModel, ChunkModel
+
+from app.db.models import ChunkModel, DocumentModel, DocumentPageModel
 from app.documents.models import ParsedDocument
+
 
 class DocumentRepository:
     def __init__(self, db: Session) -> None:
@@ -53,6 +55,6 @@ class DocumentRepository:
             self.db.delete(doc)
             self.db.commit()
             return True
-        except Exception as e:
+        except Exception:
             self.db.rollback()
-            raise e
+            raise

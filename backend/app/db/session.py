@@ -1,5 +1,6 @@
 from collections.abc import Generator
 from typing import Any
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -38,7 +39,6 @@ SessionLocal = sessionmaker(
 
 class Base(DeclarativeBase):
     """Lớp cơ sở cho toàn bộ SQLAlchemy 2.0 Models."""
-    pass
 
 def get_db() -> Generator[Session, None, None]:
     """FastAPI Dependency cung cấp Database Session trong vòng đời request."""

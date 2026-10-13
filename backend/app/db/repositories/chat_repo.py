@@ -1,7 +1,9 @@
 import uuid
 from typing import Any
+
 from sqlalchemy.orm import Session
-from app.db.models import ChatSessionModel, ChatMessageModel
+
+from app.db.models import ChatMessageModel, ChatSessionModel
 
 
 class ChatRepository:
@@ -59,3 +61,12 @@ class ChatRepository:
             .order_by(ChatSessionModel.updated_at.desc())
             .all()
         )
+
+    def delete_session(self, session_id: str) -> bool:
+        session = self.get_session(session_id)
+        if not session:
+            return False
+        self.db.delete(session)
+        self.db.commit()
+        return True
+
