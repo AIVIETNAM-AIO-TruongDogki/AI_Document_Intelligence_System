@@ -61,3 +61,37 @@ def test_get_non_existent_document(client: TestClient) -> None:
     response = client.get("/api/v1/documents/non_existent_doc_id")
     assert response.status_code == 404
     assert "Không tìm thấy" in response.json()["detail"]
+
+
+def test_list_and_delete_document_lifecycle(client: TestClient) -> None:
+    # 1. Tạo file PDF mẫu
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((50, 50), "Tai lieu can kiem tra xoa.")
+    pdf_bytes = io.BytesIO()
+    doc.save(pdf_bytes)
+    doc.close()
+    pdf_bytes.seek(0)
+
+    # 2. Upload
+    up_res = client.post(
+        "/api/v1/documents/upload",
+        files={"file": ("to_delete.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert up_res.status_code == 201
+    doc_id = up_res.json()["document_id"]
+
+    # 3. List kiểm tra có tài liệu
+    list_res = client.get("/api/v1/documents")
+    assert list_res.status_code == 200
+    docs = list_res.json()
+    assert any(d["document_id"] == doc_id for d in docs)
+
+    # 4. Xóa tài liệu
+    del_res = client.delete(f"/api/v1/documents/{doc_id}")
+    assert del_res.status_code == 204
+
+    # 5. Kiểm tra tài liệu đã bị xóa (404)
+    get_res = client.get(f"/api/v1/documents/{doc_id}")
+    assert get_res.status_code == 404
+

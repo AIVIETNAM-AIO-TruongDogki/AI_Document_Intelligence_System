@@ -123,3 +123,48 @@ def test_chat_api_no_matching_documents(client: TestClient) -> None:
     assert response.status_code == 200
     data = response.json()
     assert data["sources"] == []
+
+
+def test_chat_sessions_history_and_deletion(client: TestClient) -> None:
+    """Kiểm tra lưu lịch sử chat, truy vấn phiên và xóa phiên trò chuyện."""
+    # 1. Gửi tin nhắn đầu tiên (tự động tạo session)
+    res1 = client.post("/api/v1/chat", json={"query": "Xin chào hệ thống!"})
+    assert res1.status_code == 200
+    session_id = res1.json()["session_id"]
+    assert session_id.startswith("session_")
+
+    # 2. Gửi tin nhắn tiếp theo trong cùng session
+    res2 = client.post(
+        "/api/v1/chat",
+        json={"query": "Tôi muốn hỏi thêm câu thứ hai.", "session_id": session_id},
+    )
+    assert res2.status_code == 200
+    assert res2.json()["session_id"] == session_id
+
+    # 3. Lấy danh sách sessions
+    sessions_res = client.get("/api/v1/chat/sessions")
+    assert sessions_res.status_code == 200
+    sessions_data = sessions_res.json()
+    assert any(s["id"] == session_id for s in sessions_data)
+
+    # 4. Lấy chi tiết session kèm lịch sử tin nhắn
+    detail_res = client.get(f"/api/v1/chat/sessions/{session_id}")
+    assert detail_res.status_code == 200
+    detail_data = detail_res.json()
+    assert detail_data["id"] == session_id
+    # Phải có 4 tin nhắn: user 1, assistant 1, user 2, assistant 2
+    assert len(detail_data["messages"]) == 4
+    assert detail_data["messages"][0]["role"] == "user"
+    assert detail_data["messages"][0]["content"] == "Xin chào hệ thống!"
+    assert detail_data["messages"][1]["role"] == "assistant"
+    assert detail_data["messages"][2]["role"] == "user"
+    assert detail_data["messages"][3]["role"] == "assistant"
+
+    # 5. Xóa session
+    del_res = client.delete(f"/api/v1/chat/sessions/{session_id}")
+    assert del_res.status_code == 204
+
+    # 6. Kiểm tra session đã bị xóa thật sự
+    check_del = client.get(f"/api/v1/chat/sessions/{session_id}")
+    assert check_del.status_code == 404
+
