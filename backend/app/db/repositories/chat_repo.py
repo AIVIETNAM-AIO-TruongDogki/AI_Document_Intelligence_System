@@ -1,9 +1,7 @@
 import uuid
 from typing import Any
-
 from sqlalchemy.orm import Session
-
-from app.db.models import ChatMessageModel, ChatSessionModel
+from app.db.models import ChatSessionModel, ChatMessageModel
 
 
 class ChatRepository:
@@ -45,8 +43,6 @@ class ChatRepository:
             .order_by(ChatMessageModel.created_at.asc())
             .all()
         )
-
-    # --- NẾU BỔ SUNG THÊM CÁC HÀM Ở DÒNG 46 TRỞ ĐI, ĐẢM BẢO CÓ `def` VÀ THỤT LỀ CHUẨN: ---
 
     def get_session(self, session_id: str) -> ChatSessionModel | None:
         return (
