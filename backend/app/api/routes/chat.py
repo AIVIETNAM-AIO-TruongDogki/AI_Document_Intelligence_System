@@ -40,7 +40,6 @@ def chat_with_documents(
     clean_session_id = payload.session_id if payload.session_id not in ("", "string") else None
     clean_document_id = payload.document_id if payload.document_id not in ("", "string") else None
 
-    # 1. Khởi tạo hoặc tìm nạp Chat Session
     if clean_session_id:
         session = chat_repo.get_session(clean_session_id)
         if not session:
@@ -52,14 +51,12 @@ def chat_with_documents(
         title = payload.query.strip()[:60]
         session = chat_repo.create_session(title=title)
 
-    # 2. Lưu câu hỏi của người dùng vào database
     chat_repo.add_message(
         session_id=session.id,
         role="user",
         content=payload.query,
     )
 
-    # 3. Thực thi Pipeline RAG
     try:
         rag_answer = rag_service.answer_question(
             query=payload.query,
@@ -72,7 +69,6 @@ def chat_with_documents(
             detail=str(e),
         ) from e
 
-    # 4. Định dạng nguồn trích dẫn
     sources = [
         SourceSchema(
             source_index=src.source_index,
@@ -84,14 +80,12 @@ def chat_with_documents(
         for src in rag_answer.sources
     ]
 
-    # 5. Định dạng thống kê token
     usage = TokenUsageSchema(
         prompt_tokens=rag_answer.tokens_used.get("prompt_tokens", 0),
         completion_tokens=rag_answer.tokens_used.get("completion_tokens", 0),
         total_tokens=rag_answer.tokens_used.get("total_tokens", 0),
     )
 
-    # 6. Lưu câu trả lời của trợ lý AI vào database
     sources_data = [src.model_dump() for src in sources]
     usage_data = usage.model_dump()
     chat_repo.add_message(
