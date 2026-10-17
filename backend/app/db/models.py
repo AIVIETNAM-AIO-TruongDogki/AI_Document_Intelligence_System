@@ -6,9 +6,37 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
 
-
 def utc_now() -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC)
+
+import enum
+from sqlalchemy import Enum as SQLEnum
+
+class JobStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+class JobModel(Base):
+    __tablename__ = "jobs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # job_<uuid>
+    document_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("documents.id", ondelete="CASCADE"), nullable=True
+    )
+    task_name: Mapped[str] = mapped_column(String(100), default="document_ingestion")
+    status: Mapped[JobStatus] = mapped_column(
+        SQLEnum(JobStatus), default=JobStatus.PENDING, nullable=False
+    )
+    progress: Mapped[int] = mapped_column(Integer, default=0)  # 0 đến 100%
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
 
 
 class DocumentModel(Base):
