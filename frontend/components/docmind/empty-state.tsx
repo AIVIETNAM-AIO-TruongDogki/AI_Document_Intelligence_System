@@ -17,7 +17,9 @@ export function EmptyState() {
         What would you like to know?
       </h2>
       <p className="mt-2 max-w-md text-center text-sm leading-6 text-pretty text-muted-foreground">
-        {`Ask anything about your ${contextDocuments.length} document${contextDocuments.length === 1 ? "" : "s"} in context. Every answer links back to the exact pages it came from.`}
+        {contextDocuments.length === 0
+          ? "Tải lên tài liệu PDF ở thanh bên trái để bắt đầu phân tích và hỏi đáp thông minh!"
+          : `Hỏi bất kỳ điều gì về ${contextDocuments.length} tài liệu trong ngữ cảnh. Mọi câu trả lời đều trích dẫn chính xác trang nguồn.`}
       </p>
 
       <ul className="mt-8 grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2">

@@ -4,9 +4,10 @@ import { Menu, Moon, PanelLeftOpen, Sun } from "lucide-react"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { API_BASE_URL } from "@/lib/docmind/mock-api"
 import { cn } from "@/lib/utils"
 import { useDocMind } from "./docmind-provider"
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"
 
 interface ChatHeaderProps {
   sidebarOpen: boolean

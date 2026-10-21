@@ -3,8 +3,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { createId, deriveSessionTitle } from "@/lib/docmind/format"
-import { buildSeedConversations, checkHealth, registerDocumentChunks, streamChat } from "@/lib/docmind/mock-api"
-import { SEED_DOCUMENTS, SEED_JOBS } from "@/lib/docmind/seed"
+import { checkHealthStatus } from "@/src/api/health"
+import { deleteDocument as apiDeleteDocument, listDocuments, uploadDocument } from "@/src/api/documents"
+import {
+  deleteChatSession as apiDeleteChatSession,
+  getChatSessionDetail,
+  listChatSessions,
+  sendChatMessage,
+} from "@/src/api/chat"
 import type {
   ApiStatus,
   ChatMessage,
@@ -53,15 +59,12 @@ export function useDocMind() {
   return ctx
 }
 
-const seed = buildSeedConversations()
-
 export function DocMindProvider({ children }: { children: React.ReactNode }) {
-  const [documents, setDocuments] = useState<DocumentItem[]>(SEED_DOCUMENTS)
-  const [jobs, setJobsState] = useState<IngestionJob[]>(SEED_JOBS)
-  const jobsRef = useRef<IngestionJob[]>(SEED_JOBS)
-  const failurePlan = useRef(new Map<string, number>())
-  const [sessions, setSessions] = useState<ChatSession[]>(seed.sessions)
-  const [messagesBySession, setMessagesBySession] = useState<Record<string, ChatMessage[]>>(seed.messages)
+  const [documents, setDocuments] = useState<DocumentItem[]>([])
+  const [jobs, setJobsState] = useState<IngestionJob[]>([])
+  const jobsRef = useRef<IngestionJob[]>([])
+  const [sessions, setSessions] = useState<ChatSession[]>([])
+  const [messagesBySession, setMessagesBySession] = useState<Record<string, ChatMessage[]>>({})
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [scope, setScopeState] = useState<ContextScope>("all")
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
@@ -74,18 +77,22 @@ export function DocMindProvider({ children }: { children: React.ReactNode }) {
     setJobsState(next)
   }, [])
 
+  // 1. Kiểm tra trạng thái Backend theo chu kỳ
   useEffect(() => {
     let cancelled = false
     const ping = async () => {
       try {
-        const res = await checkHealth()
-        if (!cancelled) setApiStatus(res.ok ? { state: "connected", latency: res.latency } : { state: "offline" })
+        const res = await checkHealthStatus()
+        if (!cancelled) {
+          setApiStatus(res.ok ? { state: "connected", latency: res.latency } : { state: "offline" })
+        }
       } catch {
         if (!cancelled) setApiStatus({ state: "offline" })
       }
     }
-    const initial = setTimeout(ping, 700)
-    const interval = setInterval(ping, 15000)
+
+    const initial = setTimeout(ping, 200)
+    const interval = setInterval(ping, 10000)
     return () => {
       cancelled = true
       clearTimeout(initial)
@@ -93,115 +100,137 @@ export function DocMindProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  const hasActiveJobs = jobs.some((j) => j.status === "PENDING" || j.status === "PROCESSING")
-
+  // 2. Tải danh sách tài liệu và phiên chat từ Backend CSDL khi khởi chạy
   useEffect(() => {
-    if (!hasActiveJobs) return
-    const interval = setInterval(() => {
-      const finished: DocumentItem[] = []
-      const failed: IngestionJob[] = []
+    let cancelled = false
+    const loadInitialData = async () => {
+      try {
+        const [docsRes, sessionsRes] = await Promise.allSettled([
+          listDocuments(),
+          listChatSessions(),
+        ])
 
-      const next = jobsRef.current.map((job): IngestionJob => {
-        if (job.status === "PENDING") {
-          return Math.random() > 0.45 ? { ...job, status: "PROCESSING", progress: 3 } : job
-        }
-        if (job.status !== "PROCESSING") return job
-
-        const progress = Math.min(100, job.progress + Math.round(4 + Math.random() * 9))
-        const failAt = failurePlan.current.get(job.job_id)
-        if (failAt !== undefined && progress >= failAt) {
-          const failedJob: IngestionJob = {
-            ...job,
-            status: "FAILED",
-            progress: failAt,
-            error_message: "Embedding service timed out while indexing chunks. Please retry the upload.",
-          }
-          failed.push(failedJob)
-          return failedJob
-        }
-        if (progress >= 100) {
-          finished.push({
-            document_id: job.document_id,
-            filename: job.filename,
-            file_size: job.file_size,
-            page_count: Math.max(1, Math.round(job.file_size / 160_000)),
+        if (!cancelled && docsRes.status === "fulfilled") {
+          const mappedDocs: DocumentItem[] = docsRes.value.map((d) => ({
+            document_id: d.document_id,
+            filename: d.filename,
+            file_size: d.file_size,
+            page_count: d.page_count,
             created_at: new Date().toISOString(),
-          })
-          return { ...job, status: "COMPLETED", progress: 100 }
+          }))
+          setDocuments(mappedDocs)
         }
-        return { ...job, progress }
-      })
 
-      setJobs(next)
-
-      if (finished.length > 0) {
-        finished.forEach(registerDocumentChunks)
-        setDocuments((prev) => [...finished, ...prev])
-        finished.forEach((doc) =>
-          toast.success("Document indexed", { description: `${doc.filename} is ready to query.` }),
-        )
+        if (!cancelled && sessionsRes.status === "fulfilled") {
+          const mappedSessions: ChatSession[] = sessionsRes.value.map((s) => ({
+            id: s.id,
+            title: s.title,
+            created_at: s.created_at,
+            updated_at: s.updated_at,
+          }))
+          setSessions(mappedSessions)
+        }
+      } catch (e) {
+        console.error("Không thể tải dữ liệu khởi tạo từ Backend:", e)
       }
-      failed.forEach((job) => toast.error("Ingestion failed", { description: job.filename }))
-    }, 500)
-    return () => clearInterval(interval)
-  }, [hasActiveJobs, setJobs])
+    }
 
+    loadInitialData()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // 3. Xử lý tải lên file PDF thật lên Backend API
   const uploadFiles = useCallback(
-    (fileList: FileList | File[]) => {
+    async (fileList: FileList | File[]) => {
       const files = Array.from(fileList)
-      const accepted: IngestionJob[] = []
 
       for (const file of files) {
         const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
         if (!isPdf) {
-          toast.error("Unsupported file type", { description: `${file.name} is not a PDF.` })
+          toast.error("Định dạng không hỗ trợ", { description: `${file.name} không phải là tệp PDF.` })
           continue
         }
         if (file.size > MAX_UPLOAD_BYTES) {
-          toast.error("File too large", { description: `${file.name} exceeds the 50 MB limit.` })
+          toast.error("Tệp quá lớn", { description: `${file.name} vượt quá giới hạn 50 MB.` })
           continue
         }
+
+        const jobId = createId("job")
         const job: IngestionJob = {
-          job_id: createId("job"),
-          document_id: createId("doc"),
-          status: "PENDING",
-          progress: 0,
+          job_id: jobId,
+          document_id: "",
+          status: "PROCESSING",
+          progress: 30,
           error_message: null,
           filename: file.name,
           file_size: file.size,
         }
-        if (Math.random() < 0.12) failurePlan.current.set(job.job_id, 40 + Math.round(Math.random() * 40))
-        accepted.push(job)
-      }
 
-      if (accepted.length > 0) {
-        setJobs([...accepted, ...jobsRef.current])
-        toast(`Uploading ${accepted.length} file${accepted.length > 1 ? "s" : ""}`, {
-          description: "Ingestion jobs queued for processing.",
-        })
+        setJobs([job, ...jobsRef.current])
+        toast.info(`Đang tải lên và xử lý ${file.name}...`)
+
+        try {
+          const res = await uploadDocument(file)
+          const newDoc: DocumentItem = {
+            document_id: res.document_id,
+            filename: res.filename,
+            file_size: file.size,
+            page_count: res.page_count,
+            created_at: new Date().toISOString(),
+          }
+
+          setDocuments((prev) => [newDoc, ...prev.filter((d) => d.document_id !== res.document_id)])
+          setJobs(
+            jobsRef.current.map((j) =>
+              j.job_id === jobId
+                ? { ...j, status: "COMPLETED", progress: 100, document_id: res.document_id }
+                : j
+            )
+          )
+          toast.success("Tài liệu đã lập chỉ mục thành công", {
+            description: `${res.filename} (${res.page_count} trang, ${res.chunk_count} đoạn) đã sẵn sàng để hỏi đáp!`,
+          })
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Xử lý tài liệu thất bại"
+          setJobs(
+            jobsRef.current.map((j) =>
+              j.job_id === jobId ? { ...j, status: "FAILED", error_message: message } : j
+            )
+          )
+          toast.error("Lỗi tải lên tài liệu", { description: message })
+        }
       }
     },
-    [setJobs],
+    [setJobs]
   )
 
   const dismissJob = useCallback(
     (jobId: string) => setJobs(jobsRef.current.filter((j) => j.job_id !== jobId)),
-    [setJobs],
+    [setJobs]
   )
 
   const clearFinishedJobs = useCallback(
     () => setJobs(jobsRef.current.filter((j) => j.status === "PENDING" || j.status === "PROCESSING")),
-    [setJobs],
+    [setJobs]
   )
 
+  // 4. Xóa tài liệu thật từ CSDL Backend
   const deleteDocument = useCallback(
-    (documentId: string) => {
+    async (documentId: string) => {
       const doc = documents.find((d) => d.document_id === documentId)
-      setDocuments((prev) => prev.filter((d) => d.document_id !== documentId))
-      setSelectedDocIds((prev) => prev.filter((id) => id !== documentId))
-      if (doc) toast.success("Document deleted", { description: doc.filename })
+      try {
+        await apiDeleteDocument(documentId)
+        setDocuments((prev) => prev.filter((d) => d.document_id !== documentId))
+        setSelectedDocIds((prev) => prev.filter((id) => id !== documentId))
+        if (doc) toast.success("Đã xóa tài liệu", { description: doc.filename })
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Không thể xóa tài liệu"
+        toast.error("Lỗi xóa tài liệu", { description: message })
+      }
     },
-    [documents],
+    [documents]
   )
 
   const setScope = useCallback((next: ContextScope) => {
@@ -211,13 +240,13 @@ export function DocMindProvider({ children }: { children: React.ReactNode }) {
   const toggleDocument = useCallback((documentId: string) => {
     setScopeState("selected")
     setSelectedDocIds((prev) =>
-      prev.includes(documentId) ? prev.filter((id) => id !== documentId) : [...prev, documentId],
+      prev.includes(documentId) ? prev.filter((id) => id !== documentId) : [...prev, documentId]
     )
   }, [])
 
   const contextDocuments = useMemo(
     () => (scope === "all" ? documents : documents.filter((d) => selectedDocIds.includes(d.document_id))),
-    [documents, scope, selectedDocIds],
+    [documents, scope, selectedDocIds]
   )
 
   const stopGeneration = useCallback(() => {
@@ -229,10 +258,30 @@ export function DocMindProvider({ children }: { children: React.ReactNode }) {
     setActiveSessionId(null)
   }, [])
 
-  const selectSession = useCallback((id: string) => {
-    abortRef.current?.abort()
-    setActiveSessionId(id)
-  }, [])
+  // 5. Chọn phiên chat và tải tin nhắn lịch sử nếu chưa có trong bộ nhớ
+  const selectSession = useCallback(
+    async (id: string) => {
+      abortRef.current?.abort()
+      setActiveSessionId(id)
+
+      if (!messagesBySession[id]) {
+        try {
+          const detail = await getChatSessionDetail(id)
+          const mappedMessages: ChatMessage[] = (detail.messages || []).map((m) => ({
+            id: m.id,
+            role: m.role as "user" | "assistant",
+            content: m.content,
+            sources: m.sources as CitationSource[] | null,
+            created_at: m.created_at,
+          }))
+          setMessagesBySession((prev) => ({ ...prev, [id]: mappedMessages }))
+        } catch (err) {
+          console.error("Không thể tải lịch sử tin nhắn:", err)
+        }
+      }
+    },
+    [messagesBySession]
+  )
 
   const renameSession = useCallback((id: string, title: string) => {
     const trimmed = title.trim()
@@ -240,84 +289,135 @@ export function DocMindProvider({ children }: { children: React.ReactNode }) {
     setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title: trimmed } : s)))
   }, [])
 
+  // 6. Xóa phiên chat khỏi Backend CSDL
   const deleteSession = useCallback(
-    (id: string) => {
+    async (id: string) => {
       if (id === activeSessionId) {
         abortRef.current?.abort()
         setActiveSessionId(null)
       }
-      setSessions((prev) => prev.filter((s) => s.id !== id))
-      setMessagesBySession((prev) => {
-        const { [id]: _removed, ...rest } = prev
-        return rest
-      })
-      toast.success("Chat deleted")
+      try {
+        await apiDeleteChatSession(id)
+        setSessions((prev) => prev.filter((s) => s.id !== id))
+        setMessagesBySession((prev) => {
+          const { [id]: _removed, ...rest } = prev
+          return rest
+        })
+        toast.success("Đã xóa cuộc trò chuyện")
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Không thể xóa cuộc trò chuyện"
+        toast.error("Lỗi xóa hội thoại", { description: message })
+      }
     },
-    [activeSessionId],
+    [activeSessionId]
   )
 
+  // 7. Gửi câu hỏi đến Backend RAG API thật
   const sendMessage = useCallback(
     async (text: string) => {
       const query = text.trim()
       if (!query || generation) return
 
       const now = new Date().toISOString()
-      let sessionId = activeSessionId
-      if (!sessionId) {
-        const session: ChatSession = { id: createId("ses"), title: deriveSessionTitle(query), created_at: now, updated_at: now }
-        sessionId = session.id
-        setSessions((prev) => [session, ...prev])
-        setActiveSessionId(session.id)
+      const initialSessionId = activeSessionId
+      const tempSessionId = initialSessionId || createId("ses")
+
+      if (!initialSessionId) {
+        const newSessionItem: ChatSession = {
+          id: tempSessionId,
+          title: deriveSessionTitle(query),
+          created_at: now,
+          updated_at: now,
+        }
+        setSessions((prev) => [newSessionItem, ...prev])
+        setActiveSessionId(tempSessionId)
       } else {
-        const id = sessionId
-        setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, updated_at: now } : s)))
+        setSessions((prev) =>
+          prev.map((s) => (s.id === initialSessionId ? { ...s, updated_at: now } : s))
+        )
       }
 
-      const sid = sessionId
+      const userMessage: ChatMessage = {
+        id: createId("msg"),
+        role: "user",
+        content: query,
+        created_at: now,
+      }
       const assistantId = createId("msg")
-      const userMessage: ChatMessage = { id: createId("msg"), role: "user", content: query, created_at: now }
-      const assistantMessage: ChatMessage = { id: assistantId, role: "assistant", content: "", sources: null, created_at: now }
+      const assistantMessage: ChatMessage = {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        sources: null,
+        created_at: now,
+      }
 
-      const patchAssistant = (patch: Partial<ChatMessage>) =>
-        setMessagesBySession((prev) => ({
-          ...prev,
-          [sid]: (prev[sid] ?? []).map((m) => (m.id === assistantId ? { ...m, ...patch } : m)),
-        }))
-
-      setMessagesBySession((prev) => ({ ...prev, [sid]: [...(prev[sid] ?? []), userMessage, assistantMessage] }))
+      setMessagesBySession((prev) => ({
+        ...prev,
+        [tempSessionId]: [...(prev[tempSessionId] ?? []), userMessage, assistantMessage],
+      }))
       setGeneration({ messageId: assistantId, phase: "retrieving" })
 
-      const controller = new AbortController()
-      abortRef.current = controller
-      let streamed = ""
+      const targetDocId =
+        scope === "selected" && selectedDocIds.length > 0 ? selectedDocIds[0] : null
 
       try {
-        await streamChat({
+        const res = await sendChatMessage({
           query,
-          documents: contextDocuments,
-          signal: controller.signal,
-          onSources: (sources: CitationSource[]) => {
-            patchAssistant({ sources })
-            setGeneration({ messageId: assistantId, phase: "streaming" })
-          },
-          onDelta: (content) => {
-            streamed = content
-            patchAssistant({ content })
-          },
+          document_id: targetDocId,
+          session_id: initialSessionId || null,
         })
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          patchAssistant({ content: streamed ? `${streamed}\n\n_Generation stopped._` : "_Generation stopped before a response was produced._" })
+
+        const realSessionId = res.session_id
+        const mappedSources: CitationSource[] = (res.sources || []).map((s) => {
+          const foundDoc = documents.find((d) => d.document_id === s.document_id)
+          return {
+            source_index: s.source_index,
+            chunk_id: s.chunk_id,
+            document_id: s.document_id,
+            filename: foundDoc?.filename,
+            page_numbers: s.page_numbers,
+            snippet: s.snippet,
+          }
+        })
+
+        // Nếu tạo phiên mới, cập nhật ID thật từ Backend
+        if (!initialSessionId && realSessionId !== tempSessionId) {
+          setSessions((prev) =>
+            prev.map((s) => (s.id === tempSessionId ? { ...s, id: realSessionId } : s))
+          )
+          setActiveSessionId(realSessionId)
+          setMessagesBySession((prev) => {
+            const prevMsgs = prev[tempSessionId] ?? [userMessage, assistantMessage]
+            const updatedMsgs = prevMsgs.map((m) =>
+              m.id === assistantId ? { ...m, content: res.answer, sources: mappedSources } : m
+            )
+            const { [tempSessionId]: _, ...rest } = prev
+            return { ...rest, [realSessionId]: updatedMsgs }
+          })
         } else {
-          patchAssistant({ content: "Something went wrong while generating a response. Please try again." })
-          toast.error("Generation failed")
+          setMessagesBySession((prev) => ({
+            ...prev,
+            [realSessionId]: (prev[realSessionId] ?? []).map((m) =>
+              m.id === assistantId ? { ...m, content: res.answer, sources: mappedSources } : m
+            ),
+          }))
         }
+      } catch (error: unknown) {
+        const errMessage =
+          error instanceof Error ? error.message : "Không thể nhận phản hồi từ hệ thống RAG."
+        setMessagesBySession((prev) => ({
+          ...prev,
+          [tempSessionId]: (prev[tempSessionId] ?? []).map((m) =>
+            m.id === assistantId ? { ...m, content: `⚠️ **Lỗi:** ${errMessage}` } : m
+          ),
+        }))
+        toast.error("Hỏi đáp thất bại", { description: errMessage })
       } finally {
-        if (abortRef.current === controller) abortRef.current = null
         setGeneration(null)
       }
     },
-    [activeSessionId, contextDocuments, generation],
+    [activeSessionId, documents, generation, scope, selectedDocIds]
   )
 
   const value = useMemo<DocMindContextValue>(
@@ -325,7 +425,7 @@ export function DocMindProvider({ children }: { children: React.ReactNode }) {
       documents,
       jobs,
       sessions,
-      messages: activeSessionId ? (messagesBySession[activeSessionId] ?? []) : [],
+      messages: activeSessionId ? messagesBySession[activeSessionId] ?? [] : [],
       activeSession: sessions.find((s) => s.id === activeSessionId) ?? null,
       activeSessionId,
       scope,
@@ -369,7 +469,7 @@ export function DocMindProvider({ children }: { children: React.ReactNode }) {
       toggleDocument,
       sendMessage,
       stopGeneration,
-    ],
+    ]
   )
 
   return <DocMindContext.Provider value={value}>{children}</DocMindContext.Provider>
