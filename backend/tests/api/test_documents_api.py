@@ -34,27 +34,57 @@ def test_upload_and_get_document_success(client: TestClient, tmp_path: Path) -> 
     doc.close()
     pdf_bytes.seek(0)
 
-    # 2. Upload file PDF qua API
+    # 2. Upload file PDF qua API (Async Mode)
     response = client.post(
         "/api/v1/documents/upload",
         files={"file": ("sample_report.pdf", pdf_bytes, "application/pdf")},
     )
 
-    assert response.status_code == 201
+    assert response.status_code == 202
     data = response.json()
+    assert "job_id" in data
     assert "document_id" in data
-    assert data["filename"] == "sample_report.pdf"
-    assert data["page_count"] == 2
-    assert data["chunk_count"] >= 1
+    assert data["status"] in ("PENDING", "PROCESSING", "COMPLETED")
 
+    job_id = data["job_id"]
     doc_id = data["document_id"]
 
-    # 3. Lấy chi tiết tài liệu vừa upload
+    # 3. Kiểm tra API Job status
+    job_res = client.get(f"/api/v1/jobs/{job_id}")
+    assert job_res.status_code == 200
+    job_data = job_res.json()
+    assert job_data["job_id"] == job_id
+    assert job_data["status"] == "COMPLETED"
+    assert job_data["progress"] == 100
+
+    # 4. Lấy chi tiết tài liệu vừa upload thành công
     detail_res = client.get(f"/api/v1/documents/{doc_id}")
     assert detail_res.status_code == 200
     detail_data = detail_res.json()
     assert detail_data["document_id"] == doc_id
-    assert len(detail_data["chunks"]) == data["chunk_count"]
+    assert detail_data["filename"] == "sample_report.pdf"
+    assert detail_data["page_count"] == 2
+    assert len(detail_data["chunks"]) >= 1
+
+
+def test_upload_sync_mode(client: TestClient) -> None:
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((50, 50), "Sync upload test content.")
+    pdf_bytes = io.BytesIO()
+    doc.save(pdf_bytes)
+    doc.close()
+    pdf_bytes.seek(0)
+
+    response = client.post(
+        "/api/v1/documents/upload?async_mode=false",
+        files={"file": ("sync_doc.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["filename"] == "sync_doc.pdf"
+    assert data["page_count"] == 1
+    assert data["chunk_count"] >= 1
 
 
 def test_get_non_existent_document(client: TestClient) -> None:
@@ -78,7 +108,7 @@ def test_list_and_delete_document_lifecycle(client: TestClient) -> None:
         "/api/v1/documents/upload",
         files={"file": ("to_delete.pdf", pdf_bytes, "application/pdf")},
     )
-    assert up_res.status_code == 201
+    assert up_res.status_code == 202
     doc_id = up_res.json()["document_id"]
 
     # 3. List kiểm tra có tài liệu
@@ -94,4 +124,5 @@ def test_list_and_delete_document_lifecycle(client: TestClient) -> None:
     # 5. Kiểm tra tài liệu đã bị xóa (404)
     get_res = client.get(f"/api/v1/documents/{doc_id}")
     assert get_res.status_code == 404
+
 

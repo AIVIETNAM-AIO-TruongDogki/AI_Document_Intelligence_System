@@ -33,6 +33,14 @@ class JobRepository:
     def get_job(self, job_id: str) -> JobModel | None:
         return self.db.query(JobModel).filter(JobModel.id == job_id).first()
 
+    def list_jobs(self, limit: int = 20) -> list[JobModel]:
+        return (
+            self.db.query(JobModel)
+            .order_by(JobModel.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+
     def update_progress(
         self,
         job_id: str,
@@ -60,7 +68,7 @@ class JobRepository:
             self.db.commit()
 
 
-async def process_document_background(
+def process_document_background(
     job_id: str,
     file_path: Path,
     original_filename: str,

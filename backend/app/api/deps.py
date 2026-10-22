@@ -50,6 +50,7 @@ from sqlalchemy.orm import Session
 
 from app.db.repositories.chat_repo import ChatRepository
 from app.db.repositories.document_repo import DocumentRepository
+from app.db.repositories.job_repo import JobRepository
 from app.db.session import get_db
 
 # Lưu trữ cache các tài liệu đã upload trong bộ nhớ
@@ -87,3 +88,7 @@ def get_document_repo(db: Annotated[Session, Depends(get_db)]) -> DocumentReposi
 
 def get_chat_repo(db: Annotated[Session, Depends(get_db)]) -> ChatRepository:
     return ChatRepository(db)
+
+
+def get_job_repo(db: Annotated[Session, Depends(get_db)]) -> JobRepository:
+    return JobRepository(db)

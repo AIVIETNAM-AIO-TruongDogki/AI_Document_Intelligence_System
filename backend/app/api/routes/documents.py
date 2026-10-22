@@ -4,16 +4,28 @@ from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    Response,
+    UploadFile,
+    status,
+)
 
-from app.api.deps import get_document_repo, get_search_service
+from app.api.deps import get_document_repo, get_job_repo, get_search_service
 from app.api.schemas.documents import (
     ChunkSchema,
     DocumentDetailResponse,
     DocumentListItemSchema,
     DocumentUploadResponse,
 )
+from app.api.schemas.jobs import AsyncUploadResponse
 from app.db.repositories.document_repo import DocumentRepository
+from app.db.repositories.job_repo import JobRepository, process_document_background
+from app.db.session import SessionLocal
 from app.documents.exceptions import InvalidDocumentError, NoExtractableTextError
 from app.documents.service import process_pdf
 from app.retrieval.service import SearchService
@@ -23,56 +35,87 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 
 @router.post(
     "/upload",
-    response_model=DocumentUploadResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Tải lên và xử lý tài liệu PDF",
+    response_model=AsyncUploadResponse | DocumentUploadResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Tải lên và xử lý tài liệu PDF (hỗ trợ nền)",
 )
 async def upload_document(
+    background_tasks: BackgroundTasks,
     file: Annotated[UploadFile, File(description="File PDF cần phân tích")],
+    response: Response,
     search_service: Annotated[SearchService, Depends(get_search_service)],
     doc_repo: Annotated[DocumentRepository, Depends(get_document_repo)],
-) -> DocumentUploadResponse:
+    job_repo: Annotated[JobRepository, Depends(get_job_repo)],
+    async_mode: bool = True,
+) -> AsyncUploadResponse | DocumentUploadResponse:
     """API tải lên tài liệu PDF.
-    
+
+    - async_mode=True (mặc định): Trả về HTTP 202 Accepted và job_id để kiểm tra tiến độ nền.
+    - async_mode=False: Xử lý đồng bộ và trả về HTTP 201 Created.
     """
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Chỉ chấp nhận tệp định dạng .pdf.",
         )
-    
+
     document_id = f"doc_{uuid4()}"
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
         tmp_path = Path(temp_file.name)
-    
+
     try:
         content = await file.read()
         tmp_path.write_bytes(content)
 
-        parsed_doc = process_pdf(path=tmp_path, document_id=document_id)
-        if file.filename:
-            parsed_doc = replace(
-                parsed_doc,
-                metadata=replace(parsed_doc.metadata, filename=file.filename),
+        if not async_mode:
+            parsed_doc = process_pdf(path=tmp_path, document_id=document_id)
+            if file.filename:
+                parsed_doc = replace(
+                    parsed_doc,
+                    metadata=replace(parsed_doc.metadata, filename=file.filename),
+                )
+
+            search_service.index_chunks(parsed_doc.chunks)
+            doc_repo.save_parsed_document(parsed_doc, file_size=len(content))
+            response.status_code = status.HTTP_201_CREATED
+
+            return DocumentUploadResponse(
+                document_id=document_id,
+                filename=parsed_doc.metadata.filename,
+                page_count=parsed_doc.metadata.page_count,
+                chunk_count=len(parsed_doc.chunks),
             )
 
-        search_service.index_chunks(parsed_doc.chunks)
-        doc_repo.save_parsed_document(parsed_doc, file_size=len(content))
+        job = job_repo.create_job(document_id=document_id)
+        response.status_code = status.HTTP_202_ACCEPTED
 
-        return DocumentUploadResponse(
+        background_tasks.add_task(
+            process_document_background,
+            job_id=job.id,
+            file_path=tmp_path,
+            original_filename=file.filename,
             document_id=document_id,
-            filename=parsed_doc.metadata.filename,
-            page_count=parsed_doc.metadata.page_count,
-            chunk_count=len(parsed_doc.chunks),
+            db_factory=SessionLocal,
+            search_service=search_service,
         )
+
+        return AsyncUploadResponse(
+            job_id=job.id,
+            document_id=document_id,
+            status=job.status,
+        )
+
     except (InvalidDocumentError, NoExtractableTextError) as exp:
+        if tmp_path.exists():
+            tmp_path.unlink()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exp),
         )
-    finally:
-        if tmp_path.exists():
+    except Exception:
+        if not async_mode and tmp_path.exists():
             tmp_path.unlink()
+        raise
     
 
 
