@@ -6,11 +6,6 @@ from app.embeddings.base import EmbeddingProvider
 
 class EmbeddingService:
     """Service điều phối việc chuyển đổi các Chunks và Query thành Vectors.
-
-    Yêu cầu:
-    1. dimension: Trả về provider.dimension
-    2. embed_chunks: Nhận danh sách Chunk, trích xuất text, gọi provider và trả về (tuple[Chunk], tuple[vector])
-    3. embed_query: Cắt khoảng trắng thừa query.strip(), nếu rỗng ném ValueError, sau đó gọi provider.embed_query
     """
 
     def __init__(self, provider: EmbeddingProvider) -> None:

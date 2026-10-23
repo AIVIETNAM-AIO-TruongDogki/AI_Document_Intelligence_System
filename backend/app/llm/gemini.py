@@ -14,7 +14,6 @@ class GeminiProvider(BaseLLMProvider):
         genai.configure(api_key=self.api_key)
 
     def generate(self, request: LLMRequest) -> LLMResponse:
-        # Khởi tạo model kèm system_instruction (nếu có)
         model = genai.GenerativeModel(
             model_name=self.model_name,
             system_instruction=request.system_instruction,
@@ -30,7 +29,6 @@ class GeminiProvider(BaseLLMProvider):
             generation_config=generation_config,
         )
 
-        # Lấy số lượng token từ usage_metadata nếu có
         prompt_tokens = 0
         completion_tokens = 0
         if hasattr(response, "usage_metadata") and response.usage_metadata:
@@ -48,7 +46,6 @@ class GeminiProvider(BaseLLMProvider):
     def health_check(self) -> bool:
         """Kiểm tra API Key và model có hoạt động hay không."""
         try:
-            # Gửi một ping đơn giản kiểm tra tính sẵn sàng của model
             model = genai.GenerativeModel(self.model_name)
             resp = model.generate_content("ping", generation_config={"max_output_tokens": 5})
             return bool(resp and resp.text)
