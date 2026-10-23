@@ -106,3 +106,25 @@ export interface ChatSession {
 export interface ChatSessionDetail extends ChatSession {
   messages: ChatMessage[];
 }
+
+export type JobStatus = "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
+
+export interface JobResponse {
+  job_id: string;
+  document_id: string | null;
+  filename: string | null;
+  file_size: number | null;
+  task_name: string;
+  status: JobStatus;
+  progress: number;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AsyncUploadResponse {
+  job_id: string;
+  document_id: string;
+  status: JobStatus;
+  message: string;
+}

@@ -34,7 +34,7 @@ export async function apiRequest<T>(
     Accept: "application/json",
   };
 
-  let body: BodyInit | undefined = customOptions.body;
+  let body: BodyInit | null | undefined = customOptions.body;
 
   if (data !== undefined) {
     if (data instanceof FormData) {

@@ -1,18 +1,26 @@
 import { apiClient } from "@/src/api/client";
 import type {
+  AsyncUploadResponse,
   DocumentDetail,
   DocumentListItem,
   DocumentUploadResponse,
 } from "@/src/types/api";
 
 /**
- * Tải lên tệp PDF để backend phân tích, chia đoạn và vector hóa
+ * Tải lên tệp PDF để backend phân tích, chia đoạn và vector hóa (hỗ trợ bất đồng bộ qua asyncMode)
  */
-export async function uploadDocument(file: File): Promise<DocumentUploadResponse> {
+export async function uploadDocument(
+  file: File,
+  asyncMode: boolean = true
+): Promise<AsyncUploadResponse | DocumentUploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
 
-  return apiClient.post<DocumentUploadResponse>("/api/v1/documents/upload", formData);
+  const endpoint = asyncMode
+    ? "/api/v1/documents/upload"
+    : "/api/v1/documents/upload?async_mode=false";
+
+  return apiClient.post<AsyncUploadResponse | DocumentUploadResponse>(endpoint, formData);
 }
 
 /**

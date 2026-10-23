@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { createId, deriveSessionTitle } from "@/lib/docmind/format"
 import { checkHealthStatus } from "@/src/api/health"
 import { deleteDocument as apiDeleteDocument, listDocuments, uploadDocument } from "@/src/api/documents"
+import { getJobStatus } from "@/src/api/jobs"
 import {
   deleteChatSession as apiDeleteChatSession,
   getChatSessionDetail,
@@ -141,7 +142,7 @@ export function DocMindProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  // 3. Xử lý tải lên file PDF thật lên Backend API
+  // 3. Xử lý tải lên file PDF thật lên Backend API (hỗ trợ nền & polling)
   const uploadFiles = useCallback(
     async (fileList: FileList | File[]) => {
       const files = Array.from(fileList)
@@ -157,46 +158,129 @@ export function DocMindProvider({ children }: { children: React.ReactNode }) {
           continue
         }
 
-        const jobId = createId("job")
-        const job: IngestionJob = {
-          job_id: jobId,
+        const tempJobId = createId("job")
+        const initialJob: IngestionJob = {
+          job_id: tempJobId,
           document_id: "",
-          status: "PROCESSING",
-          progress: 30,
+          status: "PENDING",
+          progress: 5,
           error_message: null,
           filename: file.name,
           file_size: file.size,
         }
 
-        setJobs([job, ...jobsRef.current])
-        toast.info(`Đang tải lên và xử lý ${file.name}...`)
+        setJobs([initialJob, ...jobsRef.current])
+        toast.info(`Đang tải lên ${file.name}...`)
 
         try {
           const res = await uploadDocument(file)
-          const newDoc: DocumentItem = {
-            document_id: res.document_id,
-            filename: res.filename,
-            file_size: file.size,
-            page_count: res.page_count,
-            created_at: new Date().toISOString(),
-          }
 
-          setDocuments((prev) => [newDoc, ...prev.filter((d) => d.document_id !== res.document_id)])
-          setJobs(
-            jobsRef.current.map((j) =>
-              j.job_id === jobId
-                ? { ...j, status: "COMPLETED", progress: 100, document_id: res.document_id }
-                : j
+          // Trường hợp 1: Backend xử lý bất đồng bộ (HTTP 202 trả về job_id)
+          if ("job_id" in res) {
+            const backendJobId = res.job_id
+            const docId = res.document_id
+
+            // Cập nhật job_id thật từ server
+            setJobs(
+              jobsRef.current.map((j) =>
+                j.job_id === tempJobId
+                  ? { ...j, job_id: backendJobId, document_id: docId, status: res.status, progress: 10 }
+                  : j
+              )
             )
-          )
-          toast.success("Tài liệu đã lập chỉ mục thành công", {
-            description: `${res.filename} (${res.page_count} trang, ${res.chunk_count} đoạn) đã sẵn sàng để hỏi đáp!`,
-          })
+
+            // Khởi chạy polling kiểm tra tiến độ mỗi 1.2s
+            const pollInterval = 1200
+            const maxAttempts = 150
+            let attempts = 0
+
+            const timer = setInterval(async () => {
+              attempts++
+              try {
+                const jobStatus = await getJobStatus(backendJobId)
+
+                setJobs(
+                  jobsRef.current.map((j) =>
+                    j.job_id === backendJobId
+                      ? {
+                          ...j,
+                          status: jobStatus.status,
+                          progress: jobStatus.progress,
+                          error_message: jobStatus.error_message,
+                        }
+                      : j
+                  )
+                )
+
+                if (jobStatus.status === "COMPLETED") {
+                  clearInterval(timer)
+                  try {
+                    const freshDocs = await listDocuments()
+                    setDocuments(
+                      freshDocs.map((d) => ({
+                        document_id: d.document_id,
+                        filename: d.filename,
+                        file_size: d.file_size,
+                        page_count: d.page_count,
+                        created_at: new Date().toISOString(),
+                      }))
+                    )
+                  } catch (e) {
+                    console.error("Không thể tải lại danh sách tài liệu sau khi hoàn thành:", e)
+                  }
+                  toast.success("Tài liệu đã lập chỉ mục thành công", {
+                    description: `${file.name} đã sẵn sàng để tra cứu và hỏi đáp!`,
+                  })
+                } else if (jobStatus.status === "FAILED") {
+                  clearInterval(timer)
+                  toast.error("Lỗi xử lý tài liệu", {
+                    description: jobStatus.error_message || "Xử lý tài liệu thất bại",
+                  })
+                } else if (attempts >= maxAttempts) {
+                  clearInterval(timer)
+                  setJobs(
+                    jobsRef.current.map((j) =>
+                      j.job_id === backendJobId
+                        ? { ...j, status: "FAILED", error_message: "Quá thời gian xử lý (Timeout)" }
+                        : j
+                    )
+                  )
+                  toast.error("Quá thời gian xử lý", { description: `${file.name} xử lý quá lâu.` })
+                }
+              } catch {
+                if (attempts >= maxAttempts) {
+                  clearInterval(timer)
+                }
+              }
+            }, pollInterval)
+          } else {
+            // Trường hợp 2: Backend xử lý đồng bộ (HTTP 201)
+            const syncDoc = res
+            const newDoc: DocumentItem = {
+              document_id: syncDoc.document_id,
+              filename: syncDoc.filename,
+              file_size: file.size,
+              page_count: syncDoc.page_count,
+              created_at: new Date().toISOString(),
+            }
+
+            setDocuments((prev) => [newDoc, ...prev.filter((d) => d.document_id !== syncDoc.document_id)])
+            setJobs(
+              jobsRef.current.map((j) =>
+                j.job_id === tempJobId
+                  ? { ...j, status: "COMPLETED", progress: 100, document_id: syncDoc.document_id }
+                  : j
+              )
+            )
+            toast.success("Tài liệu đã lập chỉ mục thành công", {
+              description: `${syncDoc.filename} (${syncDoc.page_count} trang, ${syncDoc.chunk_count} đoạn) đã sẵn sàng!`,
+            })
+          }
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : "Xử lý tài liệu thất bại"
           setJobs(
             jobsRef.current.map((j) =>
-              j.job_id === jobId ? { ...j, status: "FAILED", error_message: message } : j
+              j.job_id === tempJobId ? { ...j, status: "FAILED", error_message: message } : j
             )
           )
           toast.error("Lỗi tải lên tài liệu", { description: message })
