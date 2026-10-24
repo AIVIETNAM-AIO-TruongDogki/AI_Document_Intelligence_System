@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.deps import get_job_repo
 from app.api.schemas.jobs import JobResponse
+from app.db.models import JobModel
 from app.db.repositories.job_repo import JobRepository
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])

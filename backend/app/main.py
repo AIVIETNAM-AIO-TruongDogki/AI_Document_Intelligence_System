@@ -15,10 +15,8 @@ from app.core.logging import setup_logging
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    # Khởi chạy logging và các tài nguyên khi app bật
     setup_logging()
     yield
-    # Dọn dẹp tài nguyên khi app tắt (nếu có)
 
 
 app = FastAPI(

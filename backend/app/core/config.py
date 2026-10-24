@@ -3,7 +3,11 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
-
+REDIS_HOST="localhost"
+REDIS_PORT=6379
+REDIS_URL="redis://localhost:6379/0"
+WORKER_MAX_JOBS=10
+JOB_TIMEOUT_SECONDS=600
 
 class Settings(BaseSettings):
     app_name: str = "DocMind"

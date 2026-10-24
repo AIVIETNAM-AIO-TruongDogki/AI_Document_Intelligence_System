@@ -8,20 +8,7 @@ def reciprocal_rank_fusion(
     top_k: int = 10,
     rrf_k: int = 60,
 ) -> list[SearchResult]:
-    """Kết hợp nhiều danh sách kết quả tìm kiếm bằng thuật toán Reciprocal Rank Fusion (RRF).
-
-    Công thức:
-        RRF_Score(doc) = sum_{list in ranked_lists} (1.0 / (rrf_k + rank(doc, list)))
-        Trong đó rank(doc, list) là thứ tự 1-based (1, 2, 3...) của doc trong danh sách đó.
-
-    Args:
-        ranked_lists: Danh sách các danh sách kết quả (ví dụ [dense_results, bm25_results]).
-        top_k: Số lượng kết quả hợp nhất muốn trả về.
-        rrf_k: Hằng số làm mượt mẫu số của RRF (mặc định 60).
-
-    Returns:
-        Danh sách SearchResult đã được gộp, khử trùng lặp và sắp xếp giảm dần theo điểm RRF.
-    """
+    """Kết hợp nhiều danh sách kết quả tìm kiếm bằng thuật toán Reciprocal Rank Fusion (RRF)."""
     if not ranked_lists or top_k <= 0:
         return []
 

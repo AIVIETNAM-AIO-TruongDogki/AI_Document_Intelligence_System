@@ -7,11 +7,6 @@ from app.embeddings.base import EmbeddingProvider
 
 class MockEmbeddingProvider(EmbeddingProvider):
     """Mock Embedding Provider dùng cho Unit Tests và Development cục bộ.
-
-    Yêu cầu:
-    1. Dimension: Lưu số chiều vector, ném ValueError nếu dimension <= 0.
-    2. Tính tất định (Deterministic): Cùng 1 text -> luôn ra cùng 1 vector.
-    3. Chuẩn hóa L2: Độ dài vector norm = 1.0 (chia mỗi phần tử cho sqrt(sum(x^2))).
     """
 
     def __init__(self, dimension: int = 64) -> None:
