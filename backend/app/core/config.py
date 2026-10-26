@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     database_url: str = "sqlite:///./docmind.db"
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+    # Redis & Distributed Worker Settings
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_url: str = "redis://localhost:6379/0"
+    worker_max_jobs: int = 10
+    job_timeout_seconds: int = 600
     model_config = SettingsConfigDict(
         env_file=(
             BACKEND_DIR / ".env.local",

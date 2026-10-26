@@ -11,12 +11,15 @@ from app.api.routes.jobs import router as jobs_router
 from app.api.routes.search import router as search_router
 from app.core.config import settings
 from app.core.logging import setup_logging
+from app.workers.setting import close_arq_pool, close_redis_pool
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     setup_logging()
     yield
+    await close_arq_pool()
+    await close_redis_pool()
 
 
 app = FastAPI(

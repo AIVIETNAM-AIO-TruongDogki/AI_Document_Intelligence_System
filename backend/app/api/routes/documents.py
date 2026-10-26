@@ -1,3 +1,4 @@
+import logging
 import tempfile
 from dataclasses import replace
 from pathlib import Path
@@ -29,6 +30,9 @@ from app.db.session import SessionLocal
 from app.documents.exceptions import InvalidDocumentError, NoExtractableTextError
 from app.documents.service import process_pdf
 from app.retrieval.service import SearchService
+from app.workers.setting import get_arq_pool
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -89,15 +93,35 @@ async def upload_document(
         job = job_repo.create_job(document_id=document_id)
         response.status_code = status.HTTP_202_ACCEPTED
 
-        background_tasks.add_task(
-            process_document_background,
-            job_id=job.id,
-            file_path=tmp_path,
-            original_filename=file.filename,
-            document_id=document_id,
-            db_factory=SessionLocal,
-            search_service=search_service,
-        )
+        enqueued_to_redis = False
+        try:
+            arq_pool = await get_arq_pool()
+            await arq_pool.enqueue_job(
+                "process_document_job",
+                job_id=job.id,
+                file_path=str(tmp_path),
+                original_filename=file.filename,
+                document_id=document_id,
+                _job_id=job.id,  # Kỹ thuật Idempotency: Redis dedup dựa trên job_id
+            )
+            enqueued_to_redis = True
+            logger.info("Enqueued job %s to Redis ARQ queue successfully.", job.id)
+        except Exception as queue_exc:
+            logger.warning(
+                "Redis queue unavailable (%s). Falling back to in-memory BackgroundTasks.",
+                queue_exc,
+            )
+
+        if not enqueued_to_redis:
+            background_tasks.add_task(
+                process_document_background,
+                job_id=job.id,
+                file_path=tmp_path,
+                original_filename=file.filename,
+                document_id=document_id,
+                db_factory=SessionLocal,
+                search_service=search_service,
+            )
 
         return AsyncUploadResponse(
             job_id=job.id,
