@@ -42,7 +42,9 @@ class Base(DeclarativeBase):
 
 def get_db() -> Generator[Session, None, None]:
     """FastAPI Dependency cung cấp Database Session trong vòng đời request."""
-    db= SessionLocal()
+    import app.db.models  # noqa: F401
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
     try:
         yield db
     finally:

@@ -64,7 +64,8 @@ async def upload_document(
         )
 
     document_id = f"doc_{uuid4()}"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+    upload_dir = Path("/tmp/uploads") if Path("/tmp/uploads").is_dir() else None
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf", dir=upload_dir) as temp_file:
         tmp_path = Path(temp_file.name)
 
     try:

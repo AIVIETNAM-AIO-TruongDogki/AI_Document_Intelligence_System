@@ -17,6 +17,13 @@ from app.workers.setting import close_arq_pool, close_redis_pool
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     setup_logging()
+    try:
+        from app.db.session import Base, engine
+        import app.db.models  # noqa: F401
+        Base.metadata.create_all(bind=engine)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Database tables auto-creation skipped: %s", exc)
     yield
     await close_arq_pool()
     await close_redis_pool()
