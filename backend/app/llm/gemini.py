@@ -1,5 +1,6 @@
 import google.generativeai as genai
 
+from app.core.observability import observe
 from app.llm.base import BaseLLMProvider, LLMRequest, LLMResponse
 
 
@@ -13,6 +14,7 @@ class GeminiProvider(BaseLLMProvider):
         self.model_name = model_name
         genai.configure(api_key=self.api_key)
 
+    @observe(name="GeminiProvider.generate")
     def generate(self, request: LLMRequest) -> LLMResponse:
         model = genai.GenerativeModel(
             model_name=self.model_name,

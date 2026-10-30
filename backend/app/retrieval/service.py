@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 
+from app.core.observability import observe
 from app.documents.models import Chunk
 from app.embeddings.service import EmbeddingService
 from app.retrieval.bm25 import BM25Retriever
@@ -128,6 +129,7 @@ class HybridSearchService:
 
         return len(records)
 
+    @observe(name="HybridSearchService.search")
     def search(
         self,
         query: str,

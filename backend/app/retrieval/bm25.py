@@ -27,14 +27,34 @@ class BM25Retriever:
         self._idf: dict[str, float] = {}
 
     def tokenize(self, text: str) -> list[str]:
-        """Tách từ đơn giản (hỗ trợ cả tiếng Anh lẫn tiếng Việt không dấu / có dấu).
+        """Tách từ chuẩn tiếng Việt & đa ngữ (hỗ trợ PyVi ViTokenizer + unigram tokens).
 
-        Chuyển về chữ thường, thay thế ký tự đặc biệt bằng khoảng trắng và lọc token hợp lệ.
+        Chuyển về chữ thường, loại bỏ ký tự đặc biệt. Nếu có thư viện `pyvi`,
+        sử dụng `ViTokenizer.tokenize` để bảo toàn từ ghép tiếng Việt đồng thời
+        giữ các unigram để khớp linh hoạt cả cụm từ lẫn từ đơn.
         """
         text = text.lower()
-        clean_text = re.sub(r'[^\w\s]|_', ' ', text)
-        tokens = clean_text.strip().split()
-        return [token for token in tokens if len(token) >= 1]
+        try:
+            from pyvi import ViTokenizer  # type: ignore[import-untyped]
+
+            segmented = ViTokenizer.tokenize(text)
+            clean_seg = re.sub(r"[^\w\s]", " ", segmented)
+            compound_tokens = [t.strip("_") for t in clean_seg.split() if len(t.strip("_")) >= 1]
+        except Exception:
+            compound_tokens = []
+
+        clean_text = re.sub(r"[^\w\s]|_", " ", text)
+        base_tokens = [token for token in clean_text.strip().split() if len(token) >= 1]
+
+        if not compound_tokens:
+            return base_tokens
+
+        # Kết hợp cả từ ghép (ví dụ: nghỉ_phép) và từ đơn (nghỉ, phép)
+        combined = list(base_tokens)
+        for ct in compound_tokens:
+            if "_" in ct:
+                combined.append(ct)
+        return combined
 
     def _recompute_statistics(self) -> None:
         """Tái tính toán thống kê toàn cục: Document Frequencies, Average Doc Length và IDF."""
