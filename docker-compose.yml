@@ -1,0 +1,175 @@
+networks:
+  docmind-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  qdrant_data:
+    driver: local
+  uploads_temp:
+    driver: local
+
+services:
+  # -----------------------------------------------------------
+  # 1. PostgreSQL Database
+  # -----------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: docmind-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgrespassword}
+      POSTGRES_DB: ${POSTGRES_DB:-docmind}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - docmind-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-docmind}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # -----------------------------------------------------------
+  # 2. Redis Message Broker
+  # -----------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: docmind-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - docmind-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # -----------------------------------------------------------
+  # 3. Qdrant Vector Database (Phase 9.1)
+  # -----------------------------------------------------------
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: docmind-qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - docmind-network
+
+  # -----------------------------------------------------------
+  # 4. Langfuse Observability Server (Phase 9.4)
+  # -----------------------------------------------------------
+  langfuse-server:
+    image: langfuse/langfuse:2
+    container_name: docmind-langfuse
+    restart: unless-stopped
+    ports:
+      - "${LANGFUSE_PORT:-3001}:3000"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword}@postgres:5432/${POSTGRES_DB:-docmind}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-docmind_secret_key}
+      - SALT=${LANGFUSE_SALT:-docmind_salt}
+      - NEXTAUTH_URL=http://localhost:${LANGFUSE_PORT:-3001}
+      - TELEMETRY_ENABLED=false
+    networks:
+      - docmind-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # -----------------------------------------------------------
+  # 5. FastAPI Backend (Web Producer)
+  # -----------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: docmind-backend
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      - APP_ENV=production
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword}@postgres:5432/${POSTGRES_DB:-docmind}
+      - REDIS_URL=redis://redis:6379/0
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - LANGFUSE_HOST=http://langfuse-server:3000
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      - uploads_temp:/tmp/uploads
+      - ./raw_data:/app/raw_data:ro
+    networks:
+      - docmind-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+
+  # -----------------------------------------------------------
+  # 6. ARQ Background Worker (Consumer)
+  # -----------------------------------------------------------
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: docmind-worker
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.main"]
+    environment:
+      - APP_ENV=production
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword}@postgres:5432/${POSTGRES_DB:-docmind}
+      - REDIS_URL=redis://redis:6379/0
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      - uploads_temp:/tmp/uploads
+      - ./raw_data:/app/raw_data:ro
+    networks:
+      - docmind-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+
+  # -----------------------------------------------------------
+  # 7. Next.js Frontend
+  # -----------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:${BACKEND_PORT:-8000}
+    container_name: docmind-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      - NEXT_PUBLIC_API_BASE_URL=http://localhost:${BACKEND_PORT:-8000}
+      - NEXT_PUBLIC_API_URL=http://localhost:${BACKEND_PORT:-8000}
+    networks:
+      - docmind-network
+    depends_on:
+      - backend

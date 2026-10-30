@@ -26,3 +26,7 @@ htmlcov/
 .idea/
 *.swp
 *.swo
+
+# Local Databases
+*.db
+*.sqlite3
