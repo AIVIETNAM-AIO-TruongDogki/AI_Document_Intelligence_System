@@ -60,6 +60,34 @@ class ChatResponse(BaseModel):
     )
     model: str = Field(..., description="Tên mô hình LLM đã thực hiện sinh câu trả lời")
     usage: TokenUsageSchema = Field(..., description="Thống kê lượng token đã sử dụng")
+    faithfulness_score: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Điểm độ trung thực của câu trả lời so với ngữ cảnh [0.0, 1.0]",
+    )
+    is_verified: bool = Field(
+        default=True,
+        description="Trạng thái xác thực câu trả lời đã qua hậu kiểm chống ảo giác",
+    )
+    gatekeeper_decision: str = Field(
+        default="ACCEPT",
+        description="Quyết định của Probability Gatekeeper: ACCEPT, REWRITE, hoặc FAST_REJECT",
+    )
+    relevance_probability: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Xác suất liên quan P(relevance) từ Cross-Encoder Reranker",
+    )
+    rewritten_query: str | None = Field(
+        default=None,
+        description="Câu truy vấn đã được viết lại nếu kích hoạt luồng Adaptive Query Rewriting",
+    )
+    latency_ms: float = Field(
+        default=0.0,
+        description="Tổng thời gian xử lý phản hồi (ms)",
+    )
 
 
 class ChatMessageSchema(BaseModel):

@@ -29,7 +29,7 @@ def chat_with_documents(
     rag_service: Annotated[RAGService, Depends(get_rag_service)],
     chat_repo: Annotated[ChatRepository, Depends(get_chat_repo)],
 ) -> ChatResponse:
-    """Thực hiện hỏi đáp ngữ cảnh trên tài liệu với trích dẫn nguồn và lưu lịch sử."""
+    """Thực hiện hỏi đáp ngữ cảnh trên tài liệu với trích dẫn nguồn, Gatekeeper và hậu kiểm."""
     if not payload.query.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -102,6 +102,12 @@ def chat_with_documents(
         sources=sources,
         model=rag_answer.model_name,
         usage=usage,
+        faithfulness_score=rag_answer.faithfulness_score,
+        is_verified=rag_answer.is_verified,
+        gatekeeper_decision=rag_answer.gatekeeper_decision,
+        relevance_probability=rag_answer.relevance_probability,
+        rewritten_query=rag_answer.rewritten_query,
+        latency_ms=rag_answer.latency_ms,
     )
 
 
@@ -178,4 +184,3 @@ def delete_chat_session(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Không tìm thấy phiên trò chuyện với ID: {session_id}",
         )
-

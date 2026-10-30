@@ -16,7 +16,7 @@ from fastapi import (
     status,
 )
 
-from app.api.deps import get_document_repo, get_job_repo, get_search_service
+from app.api.deps import get_document_repo, get_hybrid_search_service, get_job_repo
 from app.api.schemas.documents import (
     ChunkSchema,
     DocumentDetailResponse,
@@ -29,7 +29,7 @@ from app.db.repositories.job_repo import JobRepository, process_document_backgro
 from app.db.session import SessionLocal
 from app.documents.exceptions import InvalidDocumentError, NoExtractableTextError
 from app.documents.service import process_pdf
-from app.retrieval.service import SearchService
+from app.retrieval.service import HybridSearchService
 from app.workers.setting import get_arq_pool
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ async def upload_document(
     background_tasks: BackgroundTasks,
     file: Annotated[UploadFile, File(description="File PDF cần phân tích")],
     response: Response,
-    search_service: Annotated[SearchService, Depends(get_search_service)],
+    hybrid_search_service: Annotated[HybridSearchService, Depends(get_hybrid_search_service)],
     doc_repo: Annotated[DocumentRepository, Depends(get_document_repo)],
     job_repo: Annotated[JobRepository, Depends(get_job_repo)],
     async_mode: bool = True,
@@ -80,7 +80,7 @@ async def upload_document(
                     metadata=replace(parsed_doc.metadata, filename=file.filename),
                 )
 
-            search_service.index_chunks(parsed_doc.chunks)
+            hybrid_search_service.index_chunks(parsed_doc.chunks)
             doc_repo.save_parsed_document(parsed_doc, file_size=len(content))
             response.status_code = status.HTTP_201_CREATED
 
@@ -96,24 +96,24 @@ async def upload_document(
 
         enqueued_to_redis = False
         try:
-            arq_pool = await get_arq_pool()
-            await arq_pool.enqueue_job(
-                "process_document_job",
-                job_id=job.id,
-                file_path=str(tmp_path),
-                original_filename=file.filename,
-                document_id=document_id,
-                _job_id=job.id,  # Kỹ thuật Idempotency: Redis dedup dựa trên job_id
-            )
-            enqueued_to_redis = True
-            logger.info("Enqueued job %s to Redis ARQ queue successfully.", job.id)
+            from app.workers.setting import ping_redis
+
+            if await ping_redis():
+                arq_pool = await get_arq_pool()
+                await arq_pool.enqueue_job(
+                    "process_document_job",
+                    job_id=job.id,
+                    file_path=str(tmp_path),
+                    original_filename=file.filename,
+                    document_id=document_id,
+                    _job_id=job.id,
+                )
+                enqueued_to_redis = True
         except Exception as queue_exc:
-            logger.warning(
-                "Redis queue unavailable (%s). Falling back to in-memory BackgroundTasks.",
-                queue_exc,
-            )
+            logger.debug("Redis enqueue skipped (%s)", queue_exc)
 
         if not enqueued_to_redis:
+            # Nếu không có Redis/ARQ, xử lý ngay lập tức bằng FastAPI background_tasks
             background_tasks.add_task(
                 process_document_background,
                 job_id=job.id,
@@ -121,7 +121,7 @@ async def upload_document(
                 original_filename=file.filename,
                 document_id=document_id,
                 db_factory=SessionLocal,
-                search_service=search_service,
+                search_service=hybrid_search_service,
             )
 
         return AsyncUploadResponse(
@@ -141,7 +141,6 @@ async def upload_document(
         if not async_mode and tmp_path.exists():
             tmp_path.unlink()
         raise
-    
 
 
 @router.get(
@@ -153,8 +152,7 @@ def get_document_detail(
     document_id: str,
     doc_repo: Annotated[DocumentRepository, Depends(get_document_repo)],
 ) -> DocumentDetailResponse:
-    """Lấy danh sách các chunks và metadata của tài liệu đã phân tích.
-    """
+    """Lấy danh sách các chunks và metadata của tài liệu đã phân tích."""
     doc = doc_repo.get_by_id(document_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Không tìm thấy tài liệu")
@@ -213,4 +211,3 @@ def delete_document(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Không tìm thấy tài liệu với ID: {document_id}",
         )
-
