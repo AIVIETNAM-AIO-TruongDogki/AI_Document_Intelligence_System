@@ -22,9 +22,7 @@ class JobModel(Base):
     __tablename__ = "jobs"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)  # job_<uuid>
-    document_id: Mapped[str] = mapped_column(
-        String(64), ForeignKey("documents.id", ondelete="CASCADE"), nullable=True
-    )
+    document_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     task_name: Mapped[str] = mapped_column(String(100), default="document_ingestion")
     status: Mapped[JobStatus] = mapped_column(
         SQLEnum(JobStatus), default=JobStatus.PENDING, nullable=False

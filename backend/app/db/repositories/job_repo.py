@@ -1,12 +1,13 @@
+import uuid
 from dataclasses import replace
 from pathlib import Path
-import uuid
+
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.models import JobModel, JobStatus
 from app.db.repositories.document_repo import DocumentRepository
 from app.documents.service import process_pdf
-from app.retrieval.service import SearchService
+from app.retrieval.service import HybridSearchService, SearchService
 
 
 class JobRepository:
@@ -74,7 +75,7 @@ def process_document_background(
     original_filename: str,
     document_id: str,
     db_factory: sessionmaker,
-    search_service: SearchService,
+    search_service: SearchService | HybridSearchService,
 ) -> None:
     session = db_factory()
     job_repo = JobRepository(session)
