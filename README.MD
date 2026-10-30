@@ -1,4 +1,4 @@
-# ResearchMind AI — Enterprise Document Intelligence & Autonomous Deep Research Platform
+# OmniDoc Research — Enterprise Document Intelligence & Autonomous Deep Research Platform
 
 <p align="center">
   <img src="https://img.shields.io/badge/FastAPI-0.115+-009688.svg?style=flat&logo=FastAPI&logoColor=white" alt="FastAPI" />
