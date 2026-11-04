@@ -95,3 +95,4 @@ class InMemoryVectorStore(BaseVectorStore):
         ]
         for record_id in target_ids:
             del self._records[record_id]
+            
